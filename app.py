@@ -132,8 +132,22 @@ PLOTLY_THEME = dict(
 )
 
 # ── Auth setup
-with open(AUTH_PATH, "r", encoding="utf-8") as f:
-    config = yaml.load(f, Loader=SafeLoader)
+if "credentials" in st.secrets:
+    # Streamlit Cloud — lê dos Secrets
+    config = {
+        "credentials": {"usernames": {}},
+        "cookie": {
+            "name": st.secrets["cookie"]["name"],
+            "key": st.secrets["cookie"]["key"],
+            "expiry_days": st.secrets["cookie"]["expiry_days"],
+        },
+    }
+    for username, data in st.secrets["credentials"]["usernames"].items():
+        config["credentials"]["usernames"][username] = dict(data)
+else:
+    # Local — lê do auth.yaml
+    with open(AUTH_PATH, "r", encoding="utf-8") as f:
+        config = yaml.load(f, Loader=SafeLoader)
 
 authenticator = stauth.Authenticate(
     config["credentials"],
