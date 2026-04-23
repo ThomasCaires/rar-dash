@@ -1,20 +1,20 @@
 from pathlib import Path
 
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit_authenticator as stauth
+import yaml
+from yaml.loader import SafeLoader
 
-# ── Page config ────────────────────────────────────────────────────────────────
-
+# ── Page config
 st.set_page_config(
     page_title="RAR Dash · Perfumes",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
-# ── Styles ─────────────────────────────────────────────────────────────────────
-
+# ── Styles
 st.markdown(
     """
 <style>
@@ -43,7 +43,6 @@ html, body, [class*="css"] {
     text-transform: uppercase;
     margin-bottom: 2.5rem;
 }
-
 .kpi-box {
     background: #161616;
     border: 1px solid #2a2520;
@@ -64,7 +63,6 @@ html, body, [class*="css"] {
     margin-top: 0.2rem;
 }
 .kpi-value-accent { color: #c9a96e; }
-
 .section-title {
     font-family: 'Cormorant Garamond', serif;
     font-size: 1.3rem;
@@ -76,14 +74,12 @@ html, body, [class*="css"] {
     margin-bottom: 1.2rem;
     text-transform: uppercase;
 }
-
 .product-card {
     background: #161616;
     border: 1px solid #2a2520;
     border-radius: 4px;
     padding: 1rem;
     margin-bottom: 0.8rem;
-    transition: border-color 0.2s;
 }
 .product-card:hover { border-color: #c9a96e; }
 .product-name {
@@ -92,21 +88,12 @@ html, body, [class*="css"] {
     color: #e8e0d5;
     margin-bottom: 0.5rem;
 }
-.product-detail {
-    font-size: 0.75rem;
-    color: #6b6560;
-    letter-spacing: 0.08em;
-}
+.product-detail { font-size: 0.75rem; color: #6b6560; letter-spacing: 0.08em; }
 .badge-low {
-    background: #2a1515;
-    color: #c97070;
-    border-radius: 999px;
-    padding: 1px 8px;
-    font-size: 0.68rem;
-    letter-spacing: 0.05em;
+    background: #2a1515; color: #c97070;
+    border-radius: 999px; padding: 1px 8px;
+    font-size: 0.68rem; letter-spacing: 0.05em;
 }
-
-/* Streamlit widget overrides */
 .stTextInput > div > div > input,
 .stNumberInput > div > div > input,
 .stSelectbox > div > div {
@@ -128,26 +115,14 @@ html, body, [class*="css"] {
     padding: 0.5rem 1.5rem !important;
 }
 .stButton > button:hover { background: #e0c080 !important; }
-div[data-testid="stTab"] button {
-    font-family: 'Jost', sans-serif !important;
-    font-size: 0.75rem !important;
-    letter-spacing: 0.15em !important;
-    text-transform: uppercase !important;
-}
 </style>
 """,
     unsafe_allow_html=True,
 )
 
-# ── Data loading ───────────────────────────────────────────────────────────────
-
-from pathlib import Path
-
-import pandas as pd
-import plotly.graph_objects as go
-import streamlit as st
-
-DATA_PATH = Path(__file__).resolve().parent / "data" / "PLANILHA PERFUMES.xlsx"
+BASE_DIR = Path(__file__).resolve().parent
+AUTH_PATH = BASE_DIR / "auth.yaml"
+DATA_PATH = BASE_DIR / "data" / "PLANILHA PERFUMES.xlsx"
 
 PLOTLY_THEME = dict(
     paper_bgcolor="#0c0c0c",
@@ -156,7 +131,48 @@ PLOTLY_THEME = dict(
     colorway=["#c9a96e", "#8b7355", "#e8e0d5", "#6b6560", "#c97070"],
 )
 
+# ── Auth setup
+with open(AUTH_PATH, "r", encoding="utf-8") as f:
+    config = yaml.load(f, Loader=SafeLoader)
 
+authenticator = stauth.Authenticate(
+    config["credentials"],
+    config["cookie"]["name"],
+    config["cookie"]["key"],
+    config["cookie"]["expiry_days"],
+)
+
+st.markdown('<div class="title">RAR Dash</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">Catálogo · Perfumes</div>', unsafe_allow_html=True)
+
+authenticator.login(
+    location="main",
+    fields={
+        "Form name": "Entrar",
+        "Username": "Usuário",
+        "Password": "Senha",
+        "Login": "Entrar",
+    },
+)
+
+authentication_status = st.session_state.get("authentication_status")
+name = st.session_state.get("name")
+username = st.session_state.get("username")
+
+if authentication_status is False:
+    st.error("Usuário ou senha incorretos.")
+    st.stop()
+
+if authentication_status is None:
+    st.stop()
+
+with st.sidebar:
+    st.markdown(f"**{name or ''}**")
+    authenticator.logout(button_name="Sair", location="sidebar")
+
+
+# ── Data
+@st.cache_data(ttl=5)
 def load_data() -> pd.DataFrame:
     df = pd.read_excel(DATA_PATH)
     df = df.replace(r"^\s*$", pd.NA, regex=True)
@@ -170,72 +186,44 @@ def save_data(df: pd.DataFrame) -> None:
     st.cache_data.clear()
 
 
-st.markdown('<div class="title">RAR Dash</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">Catálogo · Perfumes</div>', unsafe_allow_html=True)
-
 df = load_data()
 
-col_perfume = next(
-    (
-        c
-        for c in df.columns
-        if "perfume" in c.lower() or "nome" in c.lower() or "produto" in c.lower()
-    ),
-    "Perfume",
-)
-col_custo = next(
-    (c for c in df.columns if "custo" in c.lower() or "cost" in c.lower()), None
-)
-col_estoque = next(
-    (c for c in df.columns if "estoque" in c.lower() or "stock" in c.lower()), None
-)
-col_venda = next(
-    (
-        c
-        for c in df.columns
-        if "venda" in c.lower() or "preco" in c.lower() or "valor" in c.lower()
-    ),
-    None,
-)
-col_imagem = next(
-    (
-        c
-        for c in df.columns
-        if "imagem" in c.lower() or "image" in c.lower() or "foto" in c.lower()
-    ),
-    None,
-)
+
+def find_col(df: pd.DataFrame, keys: list[str], default=None):
+    for c in df.columns:
+        low = str(c).lower()
+        if any(k in low for k in keys):
+            return c
+    return default
+
+
+col_perfume = find_col(df, ["perfume", "nome", "produto"], df.columns[0])
+col_custo = find_col(df, ["custo", "cost"])
+col_estoque = find_col(df, ["estoque", "stock"])
+col_venda = find_col(df, ["venda", "preco", "valor"])
+col_imagem = find_col(df, ["imagem", "image", "foto"])
 
 for col in [col_custo, col_estoque, col_venda]:
-    if col and col in df.columns:
+    if col:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
 if col_custo and col_venda:
     df["_margem_pct"] = ((df[col_venda] - df[col_custo]) / df[col_custo] * 100).round(1)
     df["_lucro_unit"] = (df[col_venda] - df[col_custo]).round(2)
 
+# ── KPIs
 k1, k2, k3, k4 = st.columns(4)
 
 with k1:
     st.markdown(
-        f"""
-        <div class="kpi-box">
-            <div class="kpi-label">Produtos</div>
-            <div class="kpi-value">{len(df)}</div>
-        </div>
-        """,
+        f'<div class="kpi-box"><div class="kpi-label">Produtos</div><div class="kpi-value">{len(df)}</div></div>',
         unsafe_allow_html=True,
     )
 
 with k2:
-    total_estoque = int(df[col_estoque].fillna(0).sum()) if col_estoque else "—"
+    total_estoque = int(df[col_estoque].fillna(0).sum()) if col_estoque else 0
     st.markdown(
-        f"""
-        <div class="kpi-box">
-            <div class="kpi-label">Total em estoque</div>
-            <div class="kpi-value">{total_estoque} un.</div>
-        </div>
-        """,
+        f'<div class="kpi-box"><div class="kpi-label">Total em estoque</div><div class="kpi-value">{total_estoque} un.</div></div>',
         unsafe_allow_html=True,
     )
 
@@ -245,35 +233,28 @@ with k3:
         f"{avg_margem:.1f}%" if avg_margem is not None and pd.notna(avg_margem) else "—"
     )
     st.markdown(
-        f"""
-        <div class="kpi-box">
-            <div class="kpi-label">Margem média</div>
-            <div class="kpi-value kpi-value-accent">{val}</div>
-        </div>
-        """,
+        f'<div class="kpi-box"><div class="kpi-label">Margem média</div><div class="kpi-value kpi-value-accent">{val}</div></div>',
         unsafe_allow_html=True,
     )
 
 with k4:
-    if col_custo and col_estoque:
-        capital = (df[col_custo].fillna(0) * df[col_estoque].fillna(0)).sum()
-        val = f"R$ {capital:,.2f}"
-    else:
-        val = "—"
+    capital = (
+        ((df[col_custo].fillna(0) * df[col_estoque].fillna(0)).sum())
+        if col_custo and col_estoque
+        else None
+    )
+    val = f"R$ {capital:,.2f}" if capital is not None else "—"
     st.markdown(
-        f"""
-        <div class="kpi-box">
-            <div class="kpi-label">Capital em estoque</div>
-            <div class="kpi-value">{val}</div>
-        </div>
-        """,
+        f'<div class="kpi-box"><div class="kpi-label">Capital em estoque</div><div class="kpi-value">{val}</div></div>',
         unsafe_allow_html=True,
     )
 
 st.markdown("<br>", unsafe_allow_html=True)
 
+# ── Tabs
 tab1, tab2, tab3 = st.tabs(["Catálogo", "Simulador de Venda", "Editar Dados"])
 
+# ── Tab 1 — Catálogo
 with tab1:
     search = st.text_input("🔍 Buscar perfume", placeholder="Digite o nome...")
     filtered = (
@@ -332,69 +313,74 @@ with tab1:
 
     with col_charts:
         st.markdown('<div class="section-title">Análise</div>', unsafe_allow_html=True)
-        if "_margem_pct" in df.columns and col_perfume:
+
+        if "_margem_pct" in df.columns and col_custo and col_venda:
             chart_df = filtered[
                 [col_perfume, "_margem_pct", "_lucro_unit", col_custo, col_venda]
             ].dropna()
 
-            fig1 = go.Figure(
-                go.Bar(
-                    x=chart_df[col_perfume],
-                    y=chart_df["_margem_pct"],
-                    marker_color=[
-                        "#c9a96e" if v >= chart_df["_margem_pct"].mean() else "#8b7355"
-                        for v in chart_df["_margem_pct"]
-                    ],
-                    text=[f"{v:.1f}%" for v in chart_df["_margem_pct"]],
-                    textposition="outside",
+            if not chart_df.empty:
+                fig1 = go.Figure(
+                    go.Bar(
+                        x=chart_df[col_perfume],
+                        y=chart_df["_margem_pct"],
+                        marker_color=[
+                            "#c9a96e"
+                            if v >= chart_df["_margem_pct"].mean()
+                            else "#8b7355"
+                            for v in chart_df["_margem_pct"]
+                        ],
+                        text=[f"{v:.1f}%" for v in chart_df["_margem_pct"]],
+                        textposition="outside",
+                    )
                 )
-            )
-            fig1.update_layout(
-                **PLOTLY_THEME,
-                title=dict(
-                    text="Margem de Lucro (%)",
-                    font=dict(family="Cormorant Garamond", size=16),
-                ),
-                xaxis=dict(showgrid=False, tickangle=-30),
-                yaxis=dict(showgrid=True, gridcolor="#1e1e1e", title=""),
-                margin=dict(t=50, b=60, l=20, r=20),
-                height=280,
-                showlegend=False,
-            )
-            st.plotly_chart(fig1, use_container_width=True)
+                fig1.update_layout(
+                    **PLOTLY_THEME,
+                    title=dict(
+                        text="Margem de Lucro (%)",
+                        font=dict(family="Cormorant Garamond", size=16),
+                    ),
+                    xaxis=dict(showgrid=False, tickangle=-30),
+                    yaxis=dict(showgrid=True, gridcolor="#1e1e1e", title=""),
+                    margin=dict(t=50, b=60, l=20, r=20),
+                    height=280,
+                    showlegend=False,
+                )
+                st.plotly_chart(fig1, use_container_width=True)
 
-            fig2 = go.Figure()
-            fig2.add_trace(
-                go.Bar(
-                    name="Custo",
-                    x=chart_df[col_perfume],
-                    y=chart_df[col_custo],
-                    marker_color="#2a2520",
+                fig2 = go.Figure()
+                fig2.add_trace(
+                    go.Bar(
+                        name="Custo",
+                        x=chart_df[col_perfume],
+                        y=chart_df[col_custo],
+                        marker_color="#2a2520",
+                    )
                 )
-            )
-            fig2.add_trace(
-                go.Bar(
-                    name="Venda",
-                    x=chart_df[col_perfume],
-                    y=chart_df[col_venda],
-                    marker_color="#c9a96e",
+                fig2.add_trace(
+                    go.Bar(
+                        name="Venda",
+                        x=chart_df[col_perfume],
+                        y=chart_df[col_venda],
+                        marker_color="#c9a96e",
+                    )
                 )
-            )
-            fig2.update_layout(
-                **PLOTLY_THEME,
-                title=dict(
-                    text="Custo vs Preço de Venda",
-                    font=dict(family="Cormorant Garamond", size=16),
-                ),
-                barmode="group",
-                xaxis=dict(showgrid=False, tickangle=-30),
-                yaxis=dict(showgrid=True, gridcolor="#1e1e1e", tickprefix="R$ "),
-                margin=dict(t=50, b=60, l=20, r=20),
-                height=280,
-                legend=dict(orientation="h", yanchor="bottom", y=1.02),
-            )
-            st.plotly_chart(fig2, use_container_width=True)
+                fig2.update_layout(
+                    **PLOTLY_THEME,
+                    title=dict(
+                        text="Custo vs Preço de Venda",
+                        font=dict(family="Cormorant Garamond", size=16),
+                    ),
+                    barmode="group",
+                    xaxis=dict(showgrid=False, tickangle=-30),
+                    yaxis=dict(showgrid=True, gridcolor="#1e1e1e", tickprefix="R$ "),
+                    margin=dict(t=50, b=60, l=20, r=20),
+                    height=280,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02),
+                )
+                st.plotly_chart(fig2, use_container_width=True)
 
+# ── Tab 2 — Simulador
 with tab2:
     st.markdown(
         '<div class="section-title">Simulador de Venda</div>', unsafe_allow_html=True
@@ -441,9 +427,9 @@ with tab2:
     lucro_unit = venda_sim - custo_base
     margem_sim = (lucro_unit / custo_base * 100) if custo_base > 0 else 0
     lucro_total = lucro_unit * qtd_sim
+    color_margem = "#c9a96e" if margem_sim >= 0 else "#c97070"
 
     with col_sim2:
-        color_margem = "#c9a96e" if margem_sim >= 0 else "#c97070"
         st.markdown(
             f"""
             <div class="kpi-box" style="margin-bottom:0.8rem">
@@ -507,6 +493,7 @@ with tab2:
     )
     st.plotly_chart(fig_gauge, use_container_width=True)
 
+# ── Tab 3 — Editar
 with tab3:
     st.markdown(
         '<div class="section-title">Editar Estoque & Preço de Venda</div>',
@@ -517,15 +504,9 @@ with tab3:
         unsafe_allow_html=True,
     )
 
-    edited = df.copy()
-    cols_edit = [col_perfume]
-    if col_estoque:
-        cols_edit.append(col_estoque)
-    if col_venda:
-        cols_edit.append(col_venda)
-
+    cols_edit = [col_perfume] + [c for c in [col_estoque, col_venda] if c]
     edited_view = st.data_editor(
-        edited[cols_edit],
+        df[cols_edit].copy(),
         use_container_width=True,
         num_rows="fixed",
         column_config={
