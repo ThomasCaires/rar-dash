@@ -1,10 +1,13 @@
+import json
 from pathlib import Path
 
+import gspread
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 import streamlit_authenticator as stauth
 import yaml
+from google.oauth2.service_account import Credentials
 from yaml.loader import SafeLoader
 
 # ── Page config
@@ -186,17 +189,33 @@ with st.sidebar:
 
 
 # ── Data
-@st.cache_data(ttl=5)
+USE_GSHEETS = "gcp_service_account" in st.secrets
+
+
+@st.cache_data(ttl=30)
 def load_data() -> pd.DataFrame:
-    df = pd.read_excel(DATA_PATH)
+    if USE_GSHEETS:
+        ws = _get_worksheet()
+        data = ws.get_all_records(numericise_ignore=["all"])
+        df = pd.DataFrame(data)
+    else:
+        df = pd.read_excel(DATA_PATH)
+
     df = df.replace(r"^\s*$", pd.NA, regex=True)
     df.columns = [str(c).strip() for c in df.columns]
     return df
 
 
 def save_data(df: pd.DataFrame) -> None:
-    with pd.ExcelWriter(DATA_PATH, engine="openpyxl", mode="w") as writer:
-        df.to_excel(writer, index=False)
+    if USE_GSHEETS:
+        ws = _get_worksheet()
+        # Limpa a planilha e reescreve com o dataframe atualizado
+        ws.clear()
+        ws.update([df.columns.tolist()] + df.fillna("").values.tolist())
+    else:
+        with pd.ExcelWriter(DATA_PATH, engine="openpyxl", mode="w") as writer:
+            df.to_excel(writer, index=False)
+
     st.cache_data.clear()
 
 
